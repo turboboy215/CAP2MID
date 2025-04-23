@@ -394,7 +394,7 @@ int main(int args, char* argv[])
 						{
 							if (songPtr == 0x0000)
 							{
-								printf("Song %i: 0x%04X (Empty, skipping)\n", songNum, songPtr);
+								printf("Song %i: 0x%04X (Empty, skipped)\n", songNum, songPtr);
 							}
 
 							else if (romData[songPtr - bankAmt] == 0x00)
@@ -404,7 +404,7 @@ int main(int args, char* argv[])
 							}
 							else
 							{
-								printf("Song %i: 0x%04X (SFX, skipping)\n", songNum, songPtr);
+								printf("Song %i: 0x%04X (SFX, skipped)\n", songNum, songPtr);
 							}
 
 							i += 2;
