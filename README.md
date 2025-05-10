@@ -23,7 +23,7 @@ Examples:
 
 The music sequence format was based on my own reverse-engineering, and was found to be almost identical to Capcom's later NES format. I was later able to add support to the NES version of not only this driver, but also the earlier iterations of the driver which are very different, especially thanks to information provided by Matrixx and Justin Olbrantz.
 
-Like most of my other programs, another converter, CAP2TXT, is also included, which prints out information about the song data from each game. This is essentially a prototype of CAP2TXT. This is, however, very out of date and only supports the Game Boy version of the later driver.
+Like most of my other programs, another converter, CAP2TXT, is also included, which prints out information about the song data from each game. This is essentially a prototype of CAP2TXT. This is, however, very out of date and only supports the Game Boy version of the later driver. The included file "convall.bat" will convert all SPC files in the directory.
 
 Supported games:
 
