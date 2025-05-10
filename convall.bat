@@ -1,0 +1,1 @@
+@for %%a in (*.spc) do CAP2MID "%%a" 1
