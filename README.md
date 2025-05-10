@@ -1,11 +1,14 @@
 # CAP2MID
-Capcom (NES/GB/GBC) to MIDI converter
+Capcom (NES/SNES/GB/GBC) to MIDI converter
 
 This tool converts music from NES, SNES, Game Boy, and Game Boy Color games using Capcom's in-house sound engine to MIDI format. This tool supports all three drivers, or re-worked versions of the driver.
 
 It works with ROM images for NES and GB/GBC and SPC files for SNES. To use it, you must specify the name of the ROM followed by the number of the bank containing the sound data (in hex). Note that on the NES, banks refer to 8kb sections (length 0x2000), while on GB/GBC, banks refer to 16kb sections (length 0x4000). For SNES, the bank number is meaningless and can always be 1.
+
 For SNES, all the music currently in RAM will be converted (usually just 1 or 2 songs), as well as the option to convert sound effects. For early games like Final Fight 1, all the music data is stored in RAM at once, so only one SPC file is needed.
+
 For GBC games that contain multiple banks of music (either 2 or 3), you must run the program multiple times specifying where each different bank is located. However, in order to prevent files from being overwritten, the MIDI files from the previous bank must either be moved to a separate folder or renamed.
+
 The flag "P" can also be additionally used to adjust the music tempo for the PAL NES. However, this flag only affects the earlier NES games (before 1990). The flag "S" can be used to convert sound effects for SNES games (unlike NES and Game Boy, sound effects on SNES use the same format as music). This is necessary to get certain tracks that are encoded as sound effects, like Dr. Light's capsule in Mega Man X games.
 
 Examples:
