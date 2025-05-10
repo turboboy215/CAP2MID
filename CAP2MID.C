@@ -1,4 +1,4 @@
-/*Capcom (NES/GB/GBC) to MIDI converter*/
+/*Capcom (NES/SNES/GB/GBC) to MIDI converter*/
 /*By Will Trowbridge*/
 /*Portions based on code by ValleyBell*/
 
@@ -9,6 +9,7 @@
 
 #define bankSize 16384
 #define bankSizeNES 8192
+#define ramSize 65536
 
 FILE* rom, * mid;
 long bank;
@@ -20,6 +21,7 @@ char outfile[1000000];
 int songNum;
 long seqPtrs[4];
 long songPtr;
+long firstPtr;
 long bankAmt;
 int foundTable = 0;
 int curInst = 0;
@@ -29,12 +31,18 @@ int usePALTempo;
 char* argv3;
 
 char string[4];
+char spcString[12];
 
 int format;
 int drvVers;
 
+char* tempPnt;
+char OutFileBase[0x100];
+
 long switchPoint[400][2];
 int switchNum = 0;
+
+int cvtSFX;
 
 unsigned static char* romData;
 unsigned static char* midData;
@@ -48,6 +56,9 @@ const char MagicBytesBNES2[7] = { 0xC9, 0xFF, 0xD0, 0x03, 0x4C, 0x6A, 0x81 };
 const char MagicBytesBGB[3] = { 0x79, 0x3D, 0x21 };
 const char MagicBytesCNES[4] = { 0x90, 0x06, 0x38, 0xED };
 const char MagicBytesCGB[5] = { 0x7C, 0x65, 0x6F, 0xB4, 0xC8 };
+const char MagicBytesSNES1[3] = { 0x1C, 0x5D, 0xF5 };
+const char MagicBytesSNES2[3] = { 0x8D, 0x00, 0xDD };
+const char MagicBytesSNES3[6] = { 0xA3, 0x1C, 0x90, 0x02, 0xAB, 0xA3 };
 
 /*Function prototypes*/
 unsigned short ReadLE16(unsigned char* Data);
@@ -120,7 +131,15 @@ unsigned int WriteNoteEvent(unsigned static char* buffer, unsigned int pos, unsi
 		}
 		else
 		{
-			Write8B(&buffer[pos], 0xC9);
+			if (format != 3)
+			{
+				Write8B(&buffer[pos], 0xC9);
+			}
+			else
+			{
+				Write8B(&buffer[pos], 0xC0 | curChan);
+			}
+
 		}
 
 		Write8B(&buffer[pos + 1], inst);
@@ -132,7 +151,15 @@ unsigned int WriteNoteEvent(unsigned static char* buffer, unsigned int pos, unsi
 		}
 		else
 		{
-			Write8B(&buffer[pos + 3], 0x99);
+			if (format != 3)
+			{
+				Write8B(&buffer[pos + 3], 0x99);
+			}
+			else
+			{
+				Write8B(&buffer[pos + 3], 0x90 | curChan);
+			}
+
 		}
 
 		pos += 4;
@@ -195,11 +222,12 @@ int WriteDeltaTime(unsigned static char* buffer, unsigned int pos, unsigned int 
 
 int main(int args, char* argv[])
 {
-	printf("Capcom (NES/GB/GBC) to MIDI converter\n");
+	cvtSFX = 0;
+	printf("Capcom (NES/SNES/GB/GBC) to MIDI converter\n");
 	if (args < 3)
 	{
 		printf("Usage: CAP2MID <rom> <bank> <flags (optional)>\n");
-		printf("Flags: P = Use PAL tempo\n");
+		printf("Flags: P = Use PAL tempo (NES), S = Convert SFX (SNES only)\n");
 		return -1;
 	}
 	else
@@ -211,6 +239,10 @@ int main(int args, char* argv[])
 			if (strcmp(argv3, "p") == 0 || strcmp(argv3, "P") == 0)
 			{
 				usePALTempo = 1;
+			}
+			if (strcmp(argv3, "s") == 0 || strcmp(argv3, "S") == 0)
+			{
+				cvtSFX = 1;
 			}
 		}
 		format = 1;
@@ -224,11 +256,26 @@ int main(int args, char* argv[])
 			bank = strtol(argv[2], NULL, 16);
 			/*Check for NES ROM header*/
 			fgets(string, 4, rom);
+			fgets(spcString, 12, rom);
 			if (!memcmp(string, "NES", 1))
 			{
 				fseek(rom, (((bank - 1) * bankSizeNES)) + 0x10, SEEK_SET);
 				format = 1;
 				bankAmt = 0x8000;
+			}
+			else if (!memcmp(spcString, "SNES-SPC700", 1))
+			{
+				fseek(rom, 0x100, SEEK_SET);
+				format = 3;
+				bankAmt = 0x0000;
+				/*Copy filename from argument - based on code by ValleyBell*/
+				strcpy(OutFileBase, argv[1]);
+				tempPnt = strrchr(OutFileBase, '.');
+				if (tempPnt == NULL)
+				{
+					tempPnt = OutFileBase + strlen(OutFileBase);
+				}
+				*tempPnt = 0;
 			}
 			else
 			{
@@ -259,6 +306,11 @@ int main(int args, char* argv[])
 			{
 				romData = (unsigned char*)malloc(bankSize);
 				fread(romData, 1, bankSize, rom);
+			}
+			else if (format == 3)
+			{
+				romData = (unsigned char*)malloc(ramSize);
+				fread(romData, 1, ramSize, rom);
 			}
 			fclose(rom);
 
@@ -367,6 +419,37 @@ int main(int args, char* argv[])
 
 			}
 
+			else if (format == 3)
+			{
+				/*Try to search the bank for song table loader (early driver)*/
+				for (i = 0; i < ramSize; i++)
+				{
+					if ((!memcmp(&romData[i], MagicBytesSNES1, 3)) && foundTable != 1)
+					{
+						tablePtrLoc = i + 3;
+						printf("Found pointer to song table at address 0x%04x!\n", tablePtrLoc);
+						tableOffset = ReadLE16(&romData[tablePtrLoc]);
+						printf("Song table starts at 0x%04x...\n", tableOffset);
+						foundTable = 1;
+						drvVers = 1;
+					}
+				}
+
+				/*Try to search the bank for song table loader (later driver)*/
+				for (i = 0; i < ramSize; i++)
+				{
+					if ((!memcmp(&romData[i], MagicBytesSNES2, 3)) && foundTable != 1)
+					{
+						tablePtrLoc = i - 8;
+						printf("Found pointer to song at address 0x%04x!\n", tablePtrLoc);
+						songPtr = romData[i - 5] + (romData[i - 8] * 0x100);
+						printf("Song starts at 0x%04x...\n", songPtr);
+						foundTable = 1;
+						drvVers = 2;
+					}
+				}
+			}
+
 
 			if (foundTable == 1)
 			{
@@ -446,28 +529,159 @@ int main(int args, char* argv[])
 							songNum++;
 						}
 					}
+					else if (format == 3)
+					{
+						songNum = 1;
+						song2mid3(songNum, songPtr);
+
+						/*Look for SFX/additional music table*/
+						for (i = 0; i < ramSize; i++)
+						{
+							if ((!memcmp(&romData[i], MagicBytesSNES3, 6)) && foundTable != 2)
+							{
+								tablePtrLoc = i - 4;
+								tableOffset = romData[i - 4] + (romData[i - 1] * 0x100);
+								printf("SFX/additional music table: 0x%04X\n", tableOffset);
+								foundTable = 2;
+							}
+						}
+
+						if (foundTable == 2)
+						{
+							i = tableOffset + 1;
+
+							if (ReadBE16(&romData[tableOffset]) == 0x0000)
+							{
+								i++;
+							}
+							firstPtr = ReadBE16(&romData[i]);
+
+							while (i < firstPtr)
+							{
+								songPtr = ReadBE16(&romData[i]);
+								if (songPtr != 0x0000 && songPtr != 0xFFFF)
+								{
+									if (romData[songPtr - bankAmt] == 0x00)
+									{
+										printf("Song %i: 0x%04X\n", songNum, songPtr);
+										song2mid3(songNum, songPtr);
+									}
+									else
+									{
+										if (cvtSFX == 1)
+										{
+											printf("Song %i: 0x%04X (SFX)\n", songNum, songPtr);
+											song2mid3(songNum, songPtr);
+										}
+										else
+										{
+											printf("Song %i: 0x%04X (SFX, skipped)\n", songNum, songPtr);
+										}
+									}
+								}
+								else
+								{
+									printf("Song %i: 0x%04X (empty, skipped)\n", songNum, songPtr);
+								}
+
+								i += 2;
+								songNum++;
+							}
+						}
+					}
 				}
 
 				else if (drvVers == 1)
 				{
-					songNum = 1;
-
-					while (ReadLE16(&romData[i]) >= 0x8000)
+					if (format == 1)
 					{
-						songPtr = ReadLE16(&romData[i]);
-						if (romData[songPtr - bankAmt] == 0x0E || romData[songPtr - bankAmt] == 0x0F || romData[songPtr - bankAmt] == 0x02 || romData[songPtr - bankAmt] == 0x01)
+						songNum = 1;
+
+						while (ReadLE16(&romData[i]) >= 0x8000)
 						{
-							printf("Song %i: 0x%04X\n", songNum, songPtr);
-							song2mid1(songNum, songPtr);
+							songPtr = ReadLE16(&romData[i]);
+							if (romData[songPtr - bankAmt] == 0x0E || romData[songPtr - bankAmt] == 0x0F || romData[songPtr - bankAmt] == 0x02 || romData[songPtr - bankAmt] == 0x01)
+							{
+								printf("Song %i: 0x%04X\n", songNum, songPtr);
+								song2mid1(songNum, songPtr);
+							}
+							else
+							{
+								printf("Song %i: 0x%04X (SFX, skipped)\n", songNum, songPtr);
+							}
+
+							i += 2;
+							songNum++;
 						}
-						else
+					}
+					else if (format == 3)
+					{
+						songNum = 1;
+						/*Check for "active song"*/
+						for (i = 0; i < ramSize; i++)
 						{
-							printf("Song %i: 0x%04X (SFX, skipped)\n", songNum, songPtr);
+							if ((!memcmp(&romData[i], MagicBytesSNES2, 3)) )
+							{
+								songPtr = romData[i - 5] + (romData[i - 8] * 0x100);
+
+								if (songPtr < 0x6000)
+								{
+									if (tableOffset != 0x2002)
+									{
+										printf("Song %i: 0x%04X\n", songNum, songPtr);
+										song2mid3(songNum, songPtr);
+										songNum++;
+									}
+								}
+
+								break;
+							}
+						}
+						i = tableOffset + 1;
+						if (ReadBE16(&romData[tableOffset]) == 0x0000)
+						{
+							i++;
+						}
+						firstPtr = ReadBE16(&romData[i]);
+
+						if (i == 0x2004)
+						{
+							firstPtr = 0x2100;
 						}
 
-						i += 2;
-						songNum++;
+						while (i < firstPtr)
+						{
+							songPtr = ReadBE16(&romData[i]);
+							if (songPtr != 0x0000 && songPtr != 0xFFFF)
+							{
+								if (romData[songPtr - bankAmt] == 0x00)
+								{
+									printf("Song %i: 0x%04X\n", songNum, songPtr);
+									song2mid3(songNum, songPtr);
+								}
+								else
+								{
+									if (cvtSFX == 1)
+									{
+										printf("Song %i: 0x%04X (SFX)\n", songNum, songPtr);
+										song2mid3(songNum, songPtr);
+									}
+									else
+									{
+										printf("Song %i: 0x%04X (SFX, skipped)\n", songNum, songPtr);
+									}
+								}
+							}
+							else
+							{
+								printf("Song %i: 0x%04X (empty, skipped)\n", songNum, songPtr);
+							}
+
+							i += 2;
+							songNum++;
+						}
 					}
+
 				}
 
 
@@ -1349,7 +1563,7 @@ void song2mid3(int songNum, long ptr)
 	unsigned char command[3];
 	long seqPos = 0;
 	unsigned int midPos = 0;
-	long songPtrs[4];
+	long songPtrs[8];
 	int trackCnt = 4;
 	int curTrack = 0;
 	long midTrackBase = 0;
@@ -1403,6 +1617,7 @@ void song2mid3(int songNum, long ptr)
 	int connExt = 0;
 	long speedCtrl = 0;
 	long masterDelay = 0;
+	int prevNote = 0;
 
 	midPos = 0;
 	ctrlMidPos = 0;
@@ -1418,12 +1633,30 @@ void song2mid3(int songNum, long ptr)
 		ctrlMidData[j] = 0;
 	}
 
-	sprintf(outfile, "song%i.mid", songNum);
+	if (format != 3)
+	{
+		sprintf(outfile, "song%i.mid", songNum);
+
+	}
+	else if (format == 3)
+	{
+		sprintf(outfile, "%s_%01X.mid", OutFileBase, songNum);
+	}
+
 	if ((mid = fopen(outfile, "wb")) == NULL)
 	{
-		printf("ERROR: Unable to write to file song%i.mid!\n", songNum);
+		if (format != 3)
+		{
+			printf("ERROR: Unable to write to file song%i.mid!\n", songNum);
+		}
+		else if (format == 3)
+		{
+			printf("ERROR: Unable to write to file %s_%01X.mid!\n", OutFileBase, songNum);
+		}
+
 		exit(2);
 	}
+
 	else
 	{
 		/*Get channel sequence pointers*/
@@ -1431,6 +1664,14 @@ void song2mid3(int songNum, long ptr)
 		songPtrs[1] = ReadBE16(&romData[ptr + 3 - bankAmt]);
 		songPtrs[2] = ReadBE16(&romData[ptr + 5 - bankAmt]);
 		songPtrs[3] = ReadBE16(&romData[ptr + 7 - bankAmt]);
+		if (format == 3)
+		{
+			trackCnt = 8;
+			songPtrs[4] = ReadBE16(&romData[ptr + 9 - bankAmt]);
+			songPtrs[5] = ReadBE16(&romData[ptr + 11 - bankAmt]);
+			songPtrs[6] = ReadBE16(&romData[ptr + 13 - bankAmt]);
+			songPtrs[7] = ReadBE16(&romData[ptr + 15 - bankAmt]);
+		}
 
 		/*Write MIDI header with "MThd"*/
 		WriteBE32(&ctrlMidData[ctrlMidPos], 0x4D546864);
@@ -1519,13 +1760,18 @@ void song2mid3(int songNum, long ptr)
 
 			ctrlDelay = 0;
 			masterDelay = 0;
+			prevNote = -1;
 
 
 			/*Add track header*/
-			valSize = WriteDeltaTime(midData, midPos, 0);
-			midPos += valSize;
-			WriteBE16(&midData[midPos], 0xFF03);
-			midPos += 2;
+			if (format != 3)
+			{
+				valSize = WriteDeltaTime(midData, midPos, 0);
+				midPos += valSize;
+				WriteBE16(&midData[midPos], 0xFF03);
+				midPos += 2;
+			}
+
 			if (format == 1)
 			{
 				Write8B(&midData[midPos], strlen(TRK_NAMES_NES[curTrack]));
@@ -1533,7 +1779,7 @@ void song2mid3(int songNum, long ptr)
 				sprintf((char*)&midData[midPos], TRK_NAMES_NES[curTrack]);
 				midPos += strlen(TRK_NAMES_NES[curTrack]);
 			}
-			else
+			else if (format == 2)
 			{
 				Write8B(&midData[midPos], strlen(TRK_NAMES_GB[curTrack]));
 				midPos++;
@@ -1567,8 +1813,12 @@ void song2mid3(int songNum, long ptr)
 				{
 					for (switchNum = 0; switchNum < 90; switchNum++)
 					{
-						if (switchPoint[switchNum][0] == masterDelay)
+						if (masterDelay >= switchPoint[switchNum][0] && switchPoint[switchNum][0] != -1)
 						{
+							if (curTrack == 2)
+							{
+								curTrack = 2;
+							}
 							transpose2 = switchPoint[switchNum][1];
 						}
 					}
@@ -1628,6 +1878,7 @@ void song2mid3(int songNum, long ptr)
 				/*Channel flags*/
 				else if (command[0] == 0x04)
 				{
+
 					mask = command[1];
 					maskArray[7] = mask & 1;
 					maskArray[6] = mask >> 1 & 1;
@@ -1700,6 +1951,10 @@ void song2mid3(int songNum, long ptr)
 						ctrlMidPos += valSize;
 						WriteBE24(&ctrlMidData[ctrlMidPos], 0xFF5103);
 						ctrlMidPos += 3;
+						if (tempo < 2)
+						{
+							tempo = 150;
+						}
 						WriteBE24(&ctrlMidData[ctrlMidPos], 60000000 / tempo);
 						ctrlMidPos += 2;
 					}
@@ -1796,7 +2051,7 @@ void song2mid3(int songNum, long ptr)
 				/*Set vibrato*/
 				else if (command[0] == 0x08)
 				{
-					if (format == 1)
+					if (format == 1 || format == 3)
 					{
 						curInst = command[1];
 						if (curInst >= 0x80)
@@ -1814,6 +2069,10 @@ void song2mid3(int songNum, long ptr)
 					if (command[1] < 8)
 					{
 						octave = command[1];
+						if (format == 3 && octave == 7)
+						{
+							octave = 5;
+						}
 					}
 					seqPos += 2;
 				}
@@ -2253,6 +2512,42 @@ void song2mid3(int songNum, long ptr)
 					seqPos += 2;
 				}
 
+				/*Set LFO parameters*/
+				else if (command[0] == 0x1A && format == 3)
+				{
+					seqPos += 3;
+				}
+
+				/*Set echo parameters*/
+				else if (command[0] == 0x1B && format == 3)
+				{
+					seqPos += 3;
+				}
+
+				/*Toggle echo on/off*/
+				else if (command[0] == 0x1C && format == 3)
+				{
+					seqPos += 2;
+				}
+
+				/*Set release rate*/
+				else if (command[0] == 0x1D && format == 3)
+				{
+					seqPos += 2;
+				}
+
+				/*Unknown command 1*/
+				else if (command[0] == 0x1E && format == 3)
+				{
+					seqPos += 2;
+				}
+
+				/*Unknown command 2*/
+				else if (command[0] == 0x1F && format == 3)
+				{
+					seqPos += 2;
+				}
+
 				/*Play note*/
 				else if (command[0] >= 0x20)
 				{
@@ -2311,6 +2606,8 @@ void song2mid3(int songNum, long ptr)
 					if (command[0] == 0x20 || command[0] == 0x40 || command[0] == 0x60 || command[0] == 0x80 || command[0] == 0xA0 || command[0] == 0xC0 || command[0] == 0xE0)
 					{
 						curDelay += curNoteLen;
+						ctrlDelay += curNoteLen;
+						masterDelay += curNoteLen;
 					}
 					else
 					{
@@ -2327,6 +2624,11 @@ void song2mid3(int songNum, long ptr)
 								curNote -= 12;
 							}
 
+							if (format == 3 && curNote > 24)
+							{
+								curNote -= 24;
+							}
+
 							curNoteLen += connExt;
 							tempPos = WriteNoteEvent(midData, midPos, curNote, curNoteLen, curDelay, firstNote, curTrack, curInst);
 							firstNote = 0;
@@ -2338,8 +2640,37 @@ void song2mid3(int songNum, long ptr)
 						}
 						else if (connect == 1)
 						{
+							if (format == 3)
+							{
+								curNote = command[0] - subVal + 23 + (octave * 12) + transpose1 + transpose2;
+								if (highOct == 1)
+								{
+									curNote += 24;
+								}
+
+								if (format == 1 && curTrack != 3)
+								{
+									curNote -= 12;
+								}
+
+								if (format == 3 && curNote > 24)
+								{
+									curNote -= 24;
+								}
+								if (curNote != prevNote && prevNote != -1)
+								{
+									tempPos = WriteNoteEvent(midData, midPos, prevNote, connExt, curDelay, firstNote, curTrack, curInst);
+									firstNote = 0;
+									curDelay = 0;
+									ctrlDelay += curNoteLen;
+									masterDelay += curNoteLen;
+									midPos = tempPos;
+									connExt = 0;
+								}
+							}
 							connExt += curNoteLen;
 						}
+						prevNote = curNote;
 					}
 					seqPos++;
 				}
@@ -2370,7 +2701,15 @@ void song2mid3(int songNum, long ptr)
 		trackSize = ctrlMidPos - ctrlMidTrackBase;
 		WriteBE16(&ctrlMidData[ctrlMidTrackBase - 2], trackSize);
 
-		sprintf(outfile, "song%d.mid", songNum);
+		if (format != 3)
+		{
+			sprintf(outfile, "song%d.mid", songNum);
+		}
+		else if (format == 3)
+		{
+			sprintf(outfile, "%s_%01X.mid", OutFileBase, songNum);
+		}
+
 		fwrite(ctrlMidData, ctrlMidPos, 1, mid);
 		fwrite(midData, midPos, 1, mid);
 		free(midData);
