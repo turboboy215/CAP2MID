@@ -83,6 +83,7 @@ SNES:
  * Street Fighter II: The World Warrior
  * Street Fighter II' Turbo: Hyper Fighting
  * Super Ghouls 'n Ghosts
+ * Super Pang
  * Super Street Fighter II: The New Challengers
  * U.N. Squadron
  * X-Men: Mutant Apocalypse
