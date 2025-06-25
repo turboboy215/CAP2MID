@@ -533,6 +533,7 @@ int main(int args, char* argv[])
 					{
 						songNum = 1;
 						song2mid3(songNum, songPtr);
+						songNum++;
 
 						/*Look for SFX/additional music table*/
 						for (i = 0; i < ramSize; i++)
@@ -565,6 +566,7 @@ int main(int args, char* argv[])
 									{
 										printf("Song %i: 0x%04X\n", songNum, songPtr);
 										song2mid3(songNum, songPtr);
+										songNum++;
 									}
 									else
 									{
